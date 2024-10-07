@@ -12,3 +12,5 @@ Then in the simulator go to File -> Open File, and select `falstad.txt`
 - Diodes
 - Inductors
 - Transistors (BJTs, JFETs, MOSFETs)
+- Opamps
+- Potentiometers

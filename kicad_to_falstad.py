@@ -4,8 +4,8 @@ from skip import Schematic
 import math
 import sys
 
-HEADER = "$ 1 0.000005 10.20027730826997 50 5 43 5e-11"
-scale = 6
+HEADER = "$ 3 0.000005 10.20027730826997 50 5 43 5e-11"
+scale = 8 / 1.27
 
 def round_sig(x, sig):
 	return round(x, sig-int(math.floor(math.log10(abs(x))))-1)
@@ -50,8 +50,8 @@ def handle_value(value_str):
 # Round, scale, and format coordinate list
 def coords(inp):
 	if type(inp) != list:
-		return round(inp) * scale
-	return str(round(inp[0]) * scale) + " " + str(round(inp[1]) * scale)
+		return round(inp * scale)
+	return str(round(inp[0] * scale)) + " " + str(round(inp[1] * scale))
 
 # Account for all 16 ways a transistor can be oriented
 def process_transistors(comp, structure, transistor_type):
@@ -136,7 +136,7 @@ print(HEADER)
 for wire in sch.wire:
 	print("w {0} {1} 0".format(coords(wire.start.value), coords(wire.end.value)))
 
-supported_types = ['R', 'C', 'L', 'Q', 'D', '#PWR']
+supported_types = ['R', 'C', 'L', 'Q', 'D', '#PWR', 'U', 'SW']
 for comp_type in supported_types:
 	comps = sch.symbol.reference_startswith(comp_type)
 	for comp in comps:
@@ -190,3 +190,63 @@ for comp_type in supported_types:
 			else:
 				val = comp.Value.value[:-1] # Strip V
 				print("R {0} {1} {2} 0 0 40 {3} 0 0 0.5".format(coords(comp.at.value), coords(comp.at.value[0]), coords(comp.at.value[1]) - 16, handle_value(val)))
+		
+		elif comp_type == "U":
+			if "Amplifier_Operational" in comp.lib_id.value:
+				inv_loc = []
+				noninv_loc = []
+				out_loc = []
+				for pin in comp.pin:
+					if pin.name == "-":
+						inv_loc = pin.location.value
+					elif pin.name == "+":
+						noninv_loc = pin.location.value
+					elif pin.name == "~":
+						out_loc = pin.location.value
+					else:
+						printerr("Warning: Unknown opamp pin: " + pin.name)
+				
+				if not inv_loc or not noninv_loc or not out_loc:
+					continue
+				
+				inp_midpoint = [(inv_loc[0] + noninv_loc[0]) / 2, (inv_loc[1] + noninv_loc[1]) / 2]
+				
+				if inp_midpoint[1] - out_loc[1] < 0.01: # Horizontal
+					
+					if inv_loc[1] < noninv_loc[1]: # Non-inverting is above
+						swap = 0
+					else:
+						swap = 1
+					
+					print("w {0} {1} {2} 0".format(coords(inv_loc), coords(inv_loc[0]), coords(inv_loc[1]) - (8 * (2 * swap - 1))))
+					print("w {0} {1} {2} 0".format(coords(noninv_loc), coords(noninv_loc[0]), coords(noninv_loc[1]) + (8 * (2 * swap - 1))))
+					
+				else:
+					printerr("Warning: Ignoring vertical opamp " + comp.Reference.value)
+					continue
+				
+				print("a {0} {1} {2} 12 -12 1000000 0 0 100000".format(coords(inp_midpoint), coords(out_loc), 10 + swap))
+		
+		elif comp_type == "R" and "Potentiometer" in comp.lib_id.value:
+			loc_1 = comp.pin.n1.location.value
+			loc_2 = comp.pin.n2.location.value
+			loc_3 = comp.pin.n3.location.value
+			
+			corner_1 = [loc_2[0], loc_3[1]]
+			corner_2 = [loc_3[0], loc_2[1]]
+			
+			# Determine which one is the actual corner
+			if math.dist(corner_1, comp.at.value[:-1]) < 0.01:
+				corner = corner_2
+			else:
+				corner = corner_1
+			
+			print("174 {0} {1} 1 {2} 0.5 {3}".format(coords(loc_1), coords(corner), handle_value(comp.Value.value), comp.Reference.value))
+		
+		elif comp_type == "SW" and "SPDT" in comp.lib_id.value:
+			loc_1 = comp.pin.A.location.value
+			loc_2 = comp.pin.B.location.value
+			loc_3 = comp.pin.C.location.value
+			midpoint = [(loc_1[0] + loc_3[0]) / 2, (loc_1[1] + loc_3[1]) / 2]
+			
+			print("S {0} {1} 0 0 false 0 2".format(coords(loc_2), coords(midpoint)))
